@@ -33,7 +33,6 @@ namespace EntertainHueSharp
 
             var endpoint = new IPEndPoint(mcastip,1900);
             var length = await client.SendAsync(bytes, bytes.Length, endpoint);
-            Verbose($"Sent {length} bytes");
             var rowsplitter = new Regex("\r\n|\r|\n");
             var keyvaluesplitter = new Regex("^([^\\:]*):\\s*(.*)$");
             while(true) 
@@ -41,8 +40,6 @@ namespace EntertainHueSharp
                 var data = await client.ReceiveAsync();
                 
                 var str = Encoding.UTF8.GetString(data.Buffer,0, data.Buffer.Length);
-                Verbose(str);
-                
                 var lines = rowsplitter.Split(str);
                 var dict = new Dictionary<string,string>();
                 foreach(var line in lines) 
