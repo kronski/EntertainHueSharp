@@ -25,7 +25,7 @@ namespace EntertainHueSharp
             
             var mcastip = IPAddress.Parse("239.255.255.250");
             var client = new UdpClient();
-            var bindendpoint = new IPEndPoint(IPAddress.Any,1900);
+            var bindendpoint = new IPEndPoint(IPAddress.Any,65507);
             client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             client.Client.Bind(bindendpoint);
             client.JoinMulticastGroup(mcastip);
