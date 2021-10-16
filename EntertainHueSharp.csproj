@@ -5,4 +5,10 @@
     <TargetFramework>net5.0</TargetFramework>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Q42.HueApi" Version="3.18.1" />
+    <PackageReference Include="Q42.HueApi.Entertainment" Version="3.18.1" />
+    <PackageReference Include="System.Net.Http.Json" Version="5.0.0" />
+  </ItemGroup>
+
 </Project>
