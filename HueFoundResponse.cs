@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Net;
 
-public struct HueFoundResponse
+public struct HueFindResponse
 {
     public bool Found;
     public IPAddress Ip;

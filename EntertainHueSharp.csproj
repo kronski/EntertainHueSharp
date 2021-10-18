@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="CommandLineParser" Version="2.8.0" />
     <PackageReference Include="Q42.HueApi" Version="3.18.1" />
     <PackageReference Include="Q42.HueApi.Entertainment" Version="3.18.1" />
     <PackageReference Include="System.Net.Http.Json" Version="5.0.0" />

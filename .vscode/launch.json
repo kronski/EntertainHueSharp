@@ -10,7 +10,11 @@
             "request": "launch",
             "preLaunchTask": "build",
             "program": "${workspaceFolder}/bin/Debug/net5.0/EntertainHueSharp.dll",
-            "args": [],
+            "args": [
+                "-v",
+                "--ip=192.168.1.221",
+                "--groupid=5"
+            ],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "stopAtEntry": false

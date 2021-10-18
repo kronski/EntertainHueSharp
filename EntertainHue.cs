@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -9,10 +10,12 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using CommandLine;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Q42.HueApi;
 using Q42.HueApi.Interfaces;
+using Q42.HueApi.Models.Groups;
 
 class EntertainHue
 {
@@ -21,7 +24,18 @@ class EntertainHue
     const string clientfile = "client.json";
     string hostName = Dns.GetHostName();
 
-    async Task<HueFoundResponse> FindHueAsync(CancellationToken token)
+    Options options;
+    class Options
+    {
+        [Option('v', "verbose", Required = false, HelpText = "Set output to verbose messages.")]
+        public bool Verbose { get; set; }
+        [Option('g', "groupid", Required = false, HelpText = "Specify entertainment groupid.")]
+        public string GroupId { get; set; }
+        [Option('i', "ip", Required = false, HelpText = "Hue ip.")]
+        public string IpNumber { get; set; }
+    }
+
+    async Task<HueFindResponse> FindHueAsync(CancellationToken token)
     {
         var message = "M-SEARCH * HTTP/1.1\r\n" +
             "HOST:239.255.255.250:1900\r\n" +
@@ -62,17 +76,17 @@ class EntertainHue
 
                 if (dict.ContainsKey("hue-bridgeid"))
                 {
-                    return new HueFoundResponse() { Ip = data.RemoteEndPoint.Address, Port = 0, Headers = dict, Found = true };
+                    return new HueFindResponse() { Ip = data.RemoteEndPoint.Address, Port = 0, Headers = dict, Found = true };
                 }
             }
             catch (OperationCanceledException)
             {
             }
         }
-        return new HueFoundResponse() { Found = false };
+        return new HueFindResponse() { Found = false };
     }
 
-    async Task<HueFoundResponse> TryFindHueAsync(int timeout)
+    async Task<HueFindResponse> TryFindHueAsync(int timeout)
     {
         var cancel = new CancellationTokenSource();
         var findHueTask = FindHueAsync(cancel.Token);
@@ -85,25 +99,32 @@ class EntertainHue
         return await findHueTask;
     }
 
-    void Verbose(params string[] s)
+    async Task Verbose(params string[] s)
+    {
+        if (!options.Verbose) return;
+        var line = string.Join(" ", s);
+        await Console.Out.WriteLineAsync(line);
+    }
+
+    async Task Error(params string[] s)
     {
         var line = string.Join(" ", s);
-        Console.WriteLine(line);
+        await Console.Error.WriteLineAsync(line);
     }
 
     async Task<bool> CheckVersion()
     {
-        Verbose("Requesting bridge information...");
+        await Verbose("Requesting bridge information...");
         var hostname = Dns.GetHostName();
 
 
         var config = await client.GetConfigAsync();
         if (config.ApiVersion.CompareTo("1.22") < 0)
         {
-            Verbose("Hue apiversion not 1.22 or above.");
+            await Verbose("Hue apiversion not 1.22 or above.");
             return false;
         }
-        Verbose($"Api version good {config.ApiVersion}...");
+        await Verbose($"Api version good {config.ApiVersion}...");
         return true;
     }
 
@@ -132,25 +153,53 @@ class EntertainHue
             }
             catch (Exception e)
             {
-                Verbose(e.Message);
+                await Verbose(e.Message);
             }
             await Task.Delay(5000);
         }
-        Verbose("No client registered");
+        await Verbose("No client registered");
         return null;
     }
 
     public async Task<int> Run(string[] args)
     {
-        Verbose("Finding hue bridge...");
-        var hue = await TryFindHueAsync(5000);
-        if (!hue.Found)
-        {
-            Verbose($"No Bridge found");
+        await Parser.Default.ParseArguments<Options>(args)
+            .WithParsed<Options>(o =>
+            {
+                options = o;
+            }).WithNotParsedAsync(async (errors) =>
+            {
+                foreach (var e in errors)
+                {
+                    await Error(e.ToString());
+                }
+            });
+        if (options is null)
             return -1;
+
+        HueFindResponse hue;
+        if (options.IpNumber is null)
+        {
+            await Verbose("Finding hue bridge...");
+            hue = await TryFindHueAsync(5000);
+            if (!hue.Found)
+            {
+                await Error($"No Bridge found");
+                return -1;
+            }
+            await Verbose($"Bridge found on {hue.Ip}");
+        }
+        else
+        {
+            hue = new HueFindResponse()
+            {
+                Found = true,
+                Ip = IPAddress.Parse(options.IpNumber),
+                Port = 0
+            };
+            await Verbose($"Using bridge {hue.Ip}");
         }
 
-        Verbose($"Bridge found on {hue.Ip}");
 
         client = new LocalHueClient(hue.Ip.ToString());
         if (!await CheckVersion()) return -2;
@@ -161,6 +210,29 @@ class EntertainHue
             clientdata = await RegisterApp();
             if (clientdata is null) return -3;
             await SaveClientFile(clientdata.Value);
+        }
+
+        client.Initialize(clientdata.Value.Username);
+
+        await Verbose("Checking for entertainment groups");
+        var groups = (await client.GetGroupsAsync()).Where(g => g.Type == GroupType.Entertainment && (options.GroupId is null || options.GroupId == g.Id));
+        string groupid;
+        switch (groups.Count())
+        {
+            case 0:
+                await Error("No entertainment groups found");
+                return -3;
+            case 1:
+                groupid = groups.First().Id;
+                await Verbose("Using group", groupid);
+                break;
+            default:
+                await Error("Multiple entertainment groups found, specify which with --groupid");
+                foreach (var g in groups)
+                {
+                    await Error($"  {g.Id} = {g.Name}");
+                }
+                return -3;
         }
 
         return 0;
@@ -174,13 +246,13 @@ class EntertainHue
 
     async Task<ClientData?> ReadClientFile()
     {
-        Verbose($"Checking for {clientfile}");
+        await Verbose($"Checking for {clientfile}");
         if (!File.Exists(clientfile))
             return null;
 
         var json = await File.ReadAllTextAsync(clientfile, Encoding.UTF8);
         var clientdata = JsonConvert.DeserializeObject<ClientData>(json);
-        Verbose("Client data found", clientdata.ToString());
+        await Verbose("Client data found", clientdata.ToString());
         return clientdata;
     }
 
