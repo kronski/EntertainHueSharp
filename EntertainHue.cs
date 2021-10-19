@@ -7,15 +7,17 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CommandLine;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Q42.HueApi;
+using Q42.HueApi.ColorConverters;
 using Q42.HueApi.Interfaces;
 using Q42.HueApi.Models.Groups;
+using Q42.HueApi.Streaming;
+using Q42.HueApi.Streaming.Models;
 
 class EntertainHue
 {
@@ -53,8 +55,8 @@ class EntertainHue
 
         var endpoint = new IPEndPoint(mcastip, 1900);
         var length = await client.SendAsync(bytes, bytes.Length, endpoint);
-        var rowsplitter = new Regex("\r\n|\r|\n");
-        var keyvaluesplitter = new Regex("^([^\\:]*):\\s*(.*)$");
+        var rowsplitter = new System.Text.RegularExpressions.Regex("\r\n|\r|\n");
+        var keyvaluesplitter = new System.Text.RegularExpressions.Regex("^([^\\:]*):\\s*(.*)$");
         while (!token.IsCancellationRequested)
         {
             try
@@ -215,16 +217,16 @@ class EntertainHue
         client.Initialize(clientdata.Value.Username);
 
         await Verbose("Checking for entertainment groups");
-        var groups = (await client.GetGroupsAsync()).Where(g => g.Type == GroupType.Entertainment && (options.GroupId is null || options.GroupId == g.Id));
-        string groupid;
+        var groups = (await client.GetEntertainmentGroups()).Where(g => options.GroupId is null || options.GroupId == g.Id);
+        Group group;
         switch (groups.Count())
         {
             case 0:
                 await Error("No entertainment groups found");
                 return -3;
             case 1:
-                groupid = groups.First().Id;
-                await Verbose("Using group", groupid);
+                group = groups.First();
+                await Verbose("Using group", group.Id);
                 break;
             default:
                 await Error("Multiple entertainment groups found, specify which with --groupid");
@@ -234,6 +236,59 @@ class EntertainHue
                 }
                 return -3;
         }
+
+
+        using var streamingHueClient = new StreamingHueClient(hue.Ip.ToString(), clientdata.Value.Username, clientdata.Value.StreamingClientKey);
+
+        await Verbose("Enabling streaming on group");
+
+        var entGroup = new StreamingGroup(group.Locations);
+
+        CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+        CancellationToken token = cancellationTokenSource.Token;
+
+        //await streamingHueClient.LocalHueClient.SetStreamingAsync(group.Id, false);
+        await streamingHueClient.LocalHueClient.SetStreamingAsync(group.Id, true);
+        await streamingHueClient.Connect(group.Id);
+
+        var random = new Random();
+
+        Task t1 = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await UpdateHueState(new RGBColor(random.NextDouble(), random.NextDouble(), random.NextDouble()));
+                try
+                {
+                    await Task.Delay(50, token);
+                }
+                catch { }
+            }
+
+            await UpdateHueState(new RGBColor(1.0, 1.0, 1.0));
+
+            async Task UpdateHueState(RGBColor color)
+            {
+                await Verbose($"{color.R},{color.G},{color.B}");
+                foreach (var l in entGroup)
+                {
+                    l.State.SetBrightness(1);
+                    l.State.SetRGBColor(color);
+                }
+                streamingHueClient.ManualUpdate(entGroup);
+            }
+        }, token);
+
+        Task t2 = Task.Run(() =>
+        {
+            Console.ReadKey(true);
+            cancellationTokenSource.Cancel();
+        });
+
+        await Task.WhenAll(t1, t2);
+
+
+        await streamingHueClient.LocalHueClient.SetStreamingAsync(group.Id, false);
 
         return 0;
     }

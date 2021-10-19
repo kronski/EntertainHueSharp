@@ -16,7 +16,7 @@
                 "--groupid=5"
             ],
             "cwd": "${workspaceFolder}",
-            "console": "internalConsole",
+            "console": "externalTerminal",
             "stopAtEntry": false
         },
         {
