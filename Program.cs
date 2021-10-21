@@ -1,2 +1,2 @@
-var app = new EntertainHue();
+var app = new EntertainHue.EntertainHue();
 return await app.Run(args);
