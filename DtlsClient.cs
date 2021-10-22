@@ -1,6 +1,8 @@
 using Org.BouncyCastle.Crypto.Tls;
 using System.Collections;
 
+#nullable enable
+
 namespace EntertainHue
 {
     /// <summary>
@@ -98,7 +100,7 @@ namespace EntertainHue
 
         protected virtual TlsKeyExchange CreatePskKeyExchange(int keyExchange)
         {
-            return new TlsPskKeyExchange(keyExchange, mSupportedSignatureAlgorithms, _mPskIdentity, null, null, mNamedCurves,
+            return new TlsPskKeyExchange(keyExchange, mSupportedSignatureAlgorithms, _mPskIdentity, null, null, null, mNamedCurves,
                 mClientECPointFormats, mServerECPointFormats);
         }
 

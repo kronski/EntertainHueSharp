@@ -251,17 +251,41 @@ namespace EntertainHue
             CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
             CancellationToken token = cancellationTokenSource.Token;
 
-            //await streamingHueClient.LocalHueClient.SetStreamingAsync(group.Id, false);
+
+
             await client.SetStreamingAsync(group.Id, true);
+            var ss = await SubscribeEventStream(hue.Ip, clientdata.Value.Username, token);
+            await client.SetStreamingAsync(group.Id, true);
+            //await PutToSubscribeEventStream(hue.Ip, clientdata.Value.Username, token);
+
+            string guid = "asd";
+            while (true)
+            {
+                var s = await ss.GetNext(token);
+                await Verbose(s);
+
+                try
+                {
+                    var obj = JArray.Parse(s);
+                    guid = (string)obj[0]["data"][0]["id"];
+                    break;
+                }
+                catch (Exception e)
+                {
+                    await Verbose(e.ToString());
+                }
+            }
+
             await Connect(clientdata.Value.StreamingClientKey, clientdata.Value.Username, hue.Ip);
 
             var random = new Random();
+
 
             Task t1 = Task.Run(async () =>
             {
                 while (!token.IsCancellationRequested)
                 {
-                    await SendState(group.Id, group.Lights.Select(l => ((byte)int.Parse(l), (byte)random.Next(255), (byte)random.Next(255), (byte)random.Next(255))));
+                    await SendState(guid, group.Lights.Select(l => ((byte)int.Parse(l), (byte)random.Next(255), (byte)random.Next(255), (byte)random.Next(255))));
                     try
                     {
                         await Task.Delay(50, token);
@@ -269,7 +293,7 @@ namespace EntertainHue
                     catch { }
                 }
 
-                await SendState(group.Id, group.Lights.Select(l => ((byte)int.Parse(l), (byte)255, (byte)255, (byte)255)));
+                await SendState(guid, group.Lights.Select(l => ((byte)int.Parse(l), (byte)255, (byte)255, (byte)255)));
 
             }, token);
 
@@ -305,7 +329,7 @@ namespace EntertainHue
             return clientdata;
         }
 
-        public async Task Connect(string clientkey, string appkey, IPAddress ip)
+        async Task Connect(string clientkey, string appkey, IPAddress ip)
         {
             byte[] psk = FromHex(clientkey);
             BasicTlsPskIdentity pskIdentity = new BasicTlsPskIdentity(appkey, psk);
@@ -323,6 +347,79 @@ namespace EntertainHue
             dtlsTransport = clientProtocol.Connect(dtlsClient, udp);
         }
 
+        internal class StreamSubscription
+        {
+            private readonly StreamReader streamReader;
+
+            public StreamSubscription(StreamReader streamReader)
+            {
+                this.streamReader = streamReader;
+            }
+            public async Task<string> GetNext(CancellationToken token)
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    Memory<char> buff = new Memory<char>(new char[1024]);
+                    var bytes = await streamReader.ReadAsync(buff, token);
+                    if (bytes > 0)
+                    {
+                        return MakeString(buff, bytes);
+                    }
+                }
+                return null;
+
+                string MakeString(Memory<char> buff, int bytes)
+                {
+                    Span<char> newspan = buff.Span.Slice(0, bytes);
+                    string s = new string(newspan);
+                    return s;
+                }
+            }
+        }
+
+        async Task PutToSubscribeEventStream(IPAddress ip, string username, CancellationToken cancellation)
+        {
+            var handler = new HttpClientHandler()
+            {
+                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            };
+
+            HttpClient c = new HttpClient(handler);
+            using (var requestMessage = new HttpRequestMessage(HttpMethod.Put, $"https://{ip}/eventstream/clip/v2"))
+            {
+                requestMessage.Headers.Add("ssl", "False");
+                requestMessage.Headers.Add("hue-application-key", username);
+
+                var response = await c.SendAsync(requestMessage);
+                response.EnsureSuccessStatusCode();
+                return;
+            }
+        }
+
+        async Task<StreamSubscription> SubscribeEventStream(IPAddress ip, string username, CancellationToken cancellation)
+        {
+            var handler = new HttpClientHandler()
+            {
+                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            };
+
+            HttpClient c = new HttpClient(handler);
+            using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"https://{ip}/eventstream/clip/v2"))
+            {
+                requestMessage.Headers.Add("ssl", "False");
+                requestMessage.Headers.Add("hue-application-key", username);
+
+                var response = await c.SendAsync(requestMessage);
+                //response.EnsureSuccessStatusCode();
+
+
+                var stream = await response.Content.ReadAsStreamAsync(cancellation);
+                var streamReader = new StreamReader(stream);
+                return new StreamSubscription(streamReader);
+            }
+
+        }
+
         private static byte[] FromHex(string hex)
         {
             hex = hex.Replace("-", "");
@@ -335,7 +432,7 @@ namespace EntertainHue
         }
 
         private static readonly List<byte> protocolName = Encoding.ASCII.GetBytes(new char[] { 'H', 'u', 'e', 'S', 't', 'r', 'e', 'a', 'm' }).ToList();
-        async Task SendState(string groupid, IEnumerable<(byte light, byte r, byte g, byte b)> lights)
+        async Task SendState(string guid, IEnumerable<(byte light, byte r, byte g, byte b)> lights)
         {
             List<byte> result = new List<byte>();
 
@@ -356,7 +453,7 @@ namespace EntertainHue
                 //0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 });
 
-            result.AddRange(Encoding.ASCII.GetBytes(groupid));
+            result.AddRange(Encoding.ASCII.GetBytes(guid));
 
             foreach (var light in lights)
             {
