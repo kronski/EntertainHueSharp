@@ -100,7 +100,7 @@ namespace EntertainHue
 
         protected virtual TlsKeyExchange CreatePskKeyExchange(int keyExchange)
         {
-            return new TlsPskKeyExchange(keyExchange, mSupportedSignatureAlgorithms, _mPskIdentity, null, null, null, mNamedCurves,
+            return new TlsPskKeyExchange(keyExchange, mSupportedSignatureAlgorithms, _mPskIdentity, null, null, mNamedCurves,
                 mClientECPointFormats, mServerECPointFormats);
         }
 

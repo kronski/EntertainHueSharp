@@ -245,36 +245,27 @@ namespace EntertainHue
                     return -3;
             }
 
-
             await Verbose("Enabling streaming on group");
 
             CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
             CancellationToken token = cancellationTokenSource.Token;
 
 
-
+            string guid;
             await client.SetStreamingAsync(group.Id, true);
-            var ss = await SubscribeEventStream(hue.Ip, clientdata.Value.Username, token);
-            await client.SetStreamingAsync(group.Id, true);
-            //await PutToSubscribeEventStream(hue.Ip, clientdata.Value.Username, token);
-
-            string guid = "asd";
-            while (true)
+            using (var ss = new StreamSubscription())
             {
-                var s = await ss.GetNext(token);
-                await Verbose(s);
+                await ss.SubscribeEventStream(hue.Ip, clientdata.Value.Username, token);
+                await client.SetStreamingAsync(group.Id, true);
 
-                try
-                {
-                    var obj = JArray.Parse(s);
-                    guid = (string)obj[0]["data"][0]["id"];
-                    break;
-                }
-                catch (Exception e)
-                {
-                    await Verbose(e.ToString());
-                }
+                guid = await ss.GetGuidAsync(token);
             }
+            if (guid == null)
+            {
+                await Error("Unable to retrive guid");
+                return -4;
+            }
+            await Verbose(guid);
 
             await Connect(clientdata.Value.StreamingClientKey, clientdata.Value.Username, hue.Ip);
 
@@ -283,9 +274,11 @@ namespace EntertainHue
 
             Task t1 = Task.Run(async () =>
             {
+                //var lights = group.Lights;
+                var lights = Enumerable.Range(0, 9).Select(x => x.ToString());
                 while (!token.IsCancellationRequested)
                 {
-                    await SendState(guid, group.Lights.Select(l => ((byte)int.Parse(l), (byte)random.Next(255), (byte)random.Next(255), (byte)random.Next(255))));
+                    await SendState(guid, lights.Select(l => ((byte)int.Parse(l), (byte)random.Next(255), (byte)random.Next(255), (byte)random.Next(255))));
                     try
                     {
                         await Task.Delay(50, token);
@@ -293,7 +286,7 @@ namespace EntertainHue
                     catch { }
                 }
 
-                await SendState(guid, group.Lights.Select(l => ((byte)int.Parse(l), (byte)255, (byte)255, (byte)255)));
+                await SendState(guid, lights.Select(l => ((byte)int.Parse(l), (byte)255, (byte)255, (byte)255)));
 
             }, token);
 
@@ -347,14 +340,25 @@ namespace EntertainHue
             dtlsTransport = clientProtocol.Connect(dtlsClient, udp);
         }
 
-        internal class StreamSubscription
+        internal class StreamSubscription : IDisposable
         {
-            private readonly StreamReader streamReader;
+            private StreamReader streamReader;
+            private HttpClient client;
 
-            public StreamSubscription(StreamReader streamReader)
+            public StreamSubscription()
             {
-                this.streamReader = streamReader;
+                client = new HttpClient(new HttpClientHandler()
+                {
+                    ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                });
             }
+
+            public void Dispose()
+            {
+                client?.Dispose();
+                streamReader?.Dispose();
+            }
+
             public async Task<string> GetNext(CancellationToken token)
             {
                 while (!token.IsCancellationRequested)
@@ -375,50 +379,45 @@ namespace EntertainHue
                     return s;
                 }
             }
-        }
 
-        async Task PutToSubscribeEventStream(IPAddress ip, string username, CancellationToken cancellation)
-        {
-            var handler = new HttpClientHandler()
+            public async Task SubscribeEventStream(IPAddress ip, string username, CancellationToken cancellation)
             {
-                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-            };
+                using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"https://{ip}/eventstream/clip/v2"))
+                {
+                    requestMessage.Headers.Add("ssl", "False");
+                    requestMessage.Headers.Add("hue-application-key", username);
 
-            HttpClient c = new HttpClient(handler);
-            using (var requestMessage = new HttpRequestMessage(HttpMethod.Put, $"https://{ip}/eventstream/clip/v2"))
+                    var response = await client.SendAsync(requestMessage);
+                    //response.EnsureSuccessStatusCode();
+
+                    var stream = await response.Content.ReadAsStreamAsync(cancellation);
+                    streamReader = new StreamReader(stream);
+                    return;
+                }
+
+            }
+
+            public async Task<string> GetGuidAsync(CancellationToken token)
             {
-                requestMessage.Headers.Add("ssl", "False");
-                requestMessage.Headers.Add("hue-application-key", username);
+                while (!token.IsCancellationRequested)
+                {
+                    var s = await GetNext(token);
+                    if (s == null) return null;
 
-                var response = await c.SendAsync(requestMessage);
-                response.EnsureSuccessStatusCode();
-                return;
+                    var obj = JToken.Parse(s);
+                    if (obj is JArray array && array.Count > 0 &&
+                        array[0] is JObject array0 && array0.TryGetValue("data", StringComparison.InvariantCulture, out var data) &&
+                        data is JArray dataarray && dataarray.Count > 0 &&
+                        dataarray[0] is JObject idobject && idobject.TryGetValue("id", StringComparison.InvariantCulture, out var id))
+                    {
+                        return (string)id;
+                    }
+                }
+                return null;
             }
         }
 
-        async Task<StreamSubscription> SubscribeEventStream(IPAddress ip, string username, CancellationToken cancellation)
-        {
-            var handler = new HttpClientHandler()
-            {
-                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-            };
 
-            HttpClient c = new HttpClient(handler);
-            using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"https://{ip}/eventstream/clip/v2"))
-            {
-                requestMessage.Headers.Add("ssl", "False");
-                requestMessage.Headers.Add("hue-application-key", username);
-
-                var response = await c.SendAsync(requestMessage);
-                //response.EnsureSuccessStatusCode();
-
-
-                var stream = await response.Content.ReadAsStreamAsync(cancellation);
-                var streamReader = new StreamReader(stream);
-                return new StreamSubscription(streamReader);
-            }
-
-        }
 
         private static byte[] FromHex(string hex)
         {
