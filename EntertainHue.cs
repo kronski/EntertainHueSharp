@@ -16,13 +16,11 @@ using Org.BouncyCastle.Crypto.Tls;
 using Org.BouncyCastle.Security;
 using Q42.HueApi;
 using Q42.HueApi.Models.Groups;
+using MMALCamera;
 
 
 namespace EntertainHue
 {
-
-
-
     class EntertainHue
     {
         LocalHueClient client;
@@ -171,8 +169,27 @@ namespace EntertainHue
             return null;
         }
 
+        public async Task<bool> TakePicture()
+        {
+            // Singleton initialized lazily. Reference once in your application.
+            MMALCamera cam = MMALCamera.Instance;
+
+            using (var imgCaptureHandler = new ImageStreamCaptureHandler("/home/pi/images/", "jpg"))        
+            {            
+                await cam.TakePicture(imgCaptureHandler, MMALEncoding.JPEG, MMALEncoding.I420);
+            }
+            
+            // Cleanup disposes all unmanaged resources and unloads Broadcom library. To be called when no more processing is to be done
+            // on the camera.
+            cam.Cleanup();
+            return true;
+        }
+
         public async Task<int> Run(string[] args)
         {
+            if(await TakePicture())
+                return 0;
+
             await Parser.Default.ParseArguments<Options>(args)
                 .WithParsed<Options>(o =>
                 {
