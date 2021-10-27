@@ -16,8 +16,10 @@ using Org.BouncyCastle.Crypto.Tls;
 using Org.BouncyCastle.Security;
 using Q42.HueApi;
 using Q42.HueApi.Models.Groups;
-using MMALCamera;
-
+using MMALSharp;
+using MMALSharp.Handlers;
+using MMALSharp.Common;
+using MMALSharp.Config;
 
 namespace EntertainHue
 {
@@ -41,6 +43,17 @@ namespace EntertainHue
             public string GroupId { get; set; }
             [Option('i', "ip", Required = false, HelpText = "Hue ip.")]
             public string IpNumber { get; set; }
+
+            [Option('x', Required = false, HelpText = "Crop x")]
+            public double? X { get; set; }
+            [Option('y', Required = false, HelpText = "Crop y")]
+            public double? Y { get; set; }
+            [Option('w', Required = false, HelpText = "Crop width")]
+            public double? Width { get; set; }
+            [Option('h', Required = false, HelpText = "Crop width")]
+            public double? Height { get; set; }
+            [Option("picture", Required = false, HelpText = "Take picture")]
+            public bool Picture { get; set; }
         }
 
         async Task<HueFindResponse> FindHueAsync(CancellationToken token)
@@ -173,12 +186,19 @@ namespace EntertainHue
         {
             // Singleton initialized lazily. Reference once in your application.
             MMALCamera cam = MMALCamera.Instance;
+            await Verbose("Taking pic");
+            MMALCameraConfig.Flips = MMALSharp.Native.MMAL_PARAM_MIRROR_T.MMAL_PARAM_MIRROR_BOTH;
+            if (options.X.HasValue ||
+                options.Y.HasValue ||
+                options.Width.HasValue ||
+                options.Height.HasValue)
+                MMALCameraConfig.ROI = new Zoom(options.X ?? 0, options.Y ?? 0, options.Width ?? 1, options.Height ?? 1);
 
-            using (var imgCaptureHandler = new ImageStreamCaptureHandler("/home/pi/images/", "jpg"))        
-            {            
+            using (var imgCaptureHandler = new ImageStreamCaptureHandler("/home/pi/images/", "jpg"))
+            {
                 await cam.TakePicture(imgCaptureHandler, MMALEncoding.JPEG, MMALEncoding.I420);
             }
-            
+
             // Cleanup disposes all unmanaged resources and unloads Broadcom library. To be called when no more processing is to be done
             // on the camera.
             cam.Cleanup();
@@ -187,9 +207,6 @@ namespace EntertainHue
 
         public async Task<int> Run(string[] args)
         {
-            if(await TakePicture())
-                return 0;
-
             await Parser.Default.ParseArguments<Options>(args)
                 .WithParsed<Options>(o =>
                 {
@@ -203,6 +220,12 @@ namespace EntertainHue
                 });
             if (options is null)
                 return -1;
+
+            if (options.Picture)
+            {
+                await TakePicture();
+                return 0;
+            }
 
             HueFindResponse hue;
             if (options.IpNumber is null)
