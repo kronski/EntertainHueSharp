@@ -20,6 +20,8 @@ using MMALSharp;
 using MMALSharp.Handlers;
 using MMALSharp.Common;
 using MMALSharp.Config;
+using MMALSharp.Components;
+using MMALSharp.Ports;
 
 namespace EntertainHue
 {
@@ -54,6 +56,9 @@ namespace EntertainHue
             public double? Height { get; set; }
             [Option("picture", Required = false, HelpText = "Take picture")]
             public bool Picture { get; set; }
+
+            [Option("cameraframes", Required = false, HelpText = "Diagnose camera fps")]
+            public bool CameraFrames { get; set; }
         }
 
         async Task<HueFindResponse> FindHueAsync(CancellationToken token)
@@ -205,6 +210,70 @@ namespace EntertainHue
             return true;
         }
 
+        public class MyInMemoryCaptureHandler : InMemoryCaptureHandler
+        {
+            private int frames = 0;
+            public int Frames => frames;
+            public override void Process(ImageContext context)
+            {
+                // The InMemoryCaptureHandler parent class has a property called "WorkingData". 
+                // It is your responsibility to look after the clearing of this property.
+
+                // The "eos" parameter indicates whether the MMAL buffer has an EOS parameter, if so, the data that's currently
+                // stored in the "WorkingData" property plus the data found in the "data" parameter indicates you have a full image frame.
+
+                // The call to base.Process will add the data to the WorkingData list.
+                base.Process(context);
+
+                if (context.Eos)
+                {
+                    Console.WriteLine(frames.ToString());
+                    this.WorkingData.Clear();
+                    frames++;
+                }
+            }
+        }
+
+        public async Task TakePictureFromVideoPort()
+        {
+            MMALCamera cam = MMALCamera.Instance;
+
+            using (var myCaptureHandler = new MyInMemoryCaptureHandler())
+            using (var splitter = new MMALSplitterComponent())
+            using (var imgEncoder = new MMALImageEncoder(continuousCapture: true))
+            using (var nullSink = new MMALNullSinkComponent())
+            {
+                cam.ConfigureCameraSettings();
+
+                var outputPortConfig = new MMALPortConfig(MMALEncoding.JPEG, MMALEncoding.I420, 90);
+                var inputPortConfig = new MMALPortConfig(MMALEncoding.OPAQUE, MMALEncoding.I420, 0);
+
+                // Create our component pipeline.         
+                imgEncoder
+                    .ConfigureInputPort(inputPortConfig, null)
+                    .ConfigureOutputPort(outputPortConfig, myCaptureHandler);
+
+                cam.Camera.VideoPort.ConnectTo(splitter);
+                splitter.Outputs[0].ConnectTo(imgEncoder);
+                cam.Camera.PreviewPort.ConnectTo(nullSink);
+
+                // Camera warm up time
+                await Task.Delay(2000);
+
+                CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+                // Process images for 15 seconds.        
+                await cam.ProcessAsync(cam.Camera.VideoPort, cts.Token);
+
+                await Verbose(myCaptureHandler.Frames.ToString());
+            }
+
+
+
+            // Only call when you no longer require the camera, i.e. on app shutdown.
+            cam.Cleanup();
+        }
+
         public async Task<int> Run(string[] args)
         {
             await Parser.Default.ParseArguments<Options>(args)
@@ -224,6 +293,12 @@ namespace EntertainHue
             if (options.Picture)
             {
                 await TakePicture();
+                return 0;
+            }
+
+            if (options.CameraFrames)
+            {
+                await TakePictureFromVideoPort();
                 return 0;
             }
 
