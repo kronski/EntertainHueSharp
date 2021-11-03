@@ -22,6 +22,9 @@ using MMALSharp.Common;
 using MMALSharp.Config;
 using MMALSharp.Components;
 using MMALSharp.Ports;
+using MMALSharp.Native;
+using MMALSharp.Common.Utility;
+using System.Diagnostics;
 
 namespace EntertainHue
 {
@@ -210,10 +213,12 @@ namespace EntertainHue
             return true;
         }
 
-        public class MyInMemoryCaptureHandler : InMemoryCaptureHandler
+        public class MyInMemoryCaptureHandler : InMemoryCaptureHandler, IVideoCaptureHandler
         {
             private int frames = 0;
+            private long bytes = 0;
             public int Frames => frames;
+            public long Bytes => bytes;
             public override void Process(ImageContext context)
             {
                 // The InMemoryCaptureHandler parent class has a property called "WorkingData". 
@@ -227,45 +232,53 @@ namespace EntertainHue
 
                 if (context.Eos)
                 {
-                    Console.WriteLine(frames.ToString());
-                    this.WorkingData.Clear();
+                    //Console.WriteLine(frames.ToString());
                     frames++;
+                    bytes += this.WorkingData.Count;
+                    this.WorkingData.Clear();
                 }
             }
+
+            public void Split()
+            {
+
+            }
         }
+
 
         public async Task TakePictureFromVideoPort()
         {
             MMALCamera cam = MMALCamera.Instance;
 
+
+            MMALCameraConfig.VideoResolution = new Resolution(640, 480); // Set to 640 x 480. Default is 1280 x 720.
+            MMALCameraConfig.VideoFramerate = new MMAL_RATIONAL_T(500, 1); // Set to 20fps. Default is 30fps.
+            MMALCameraConfig.ShutterSpeed = 0; // Set to 2s exposure time. Default is 0 (auto).
+            MMALCameraConfig.ISO = 0; // Set ISO to 400. Default is 0 (auto).
+            MMALCameraConfig.VideoEncoding = MMALEncoding.BGR24;
+            MMALCameraConfig.VideoSubformat = MMALEncoding.BGR24;
+
+
             using (var myCaptureHandler = new MyInMemoryCaptureHandler())
-            using (var splitter = new MMALSplitterComponent())
-            using (var imgEncoder = new MMALImageEncoder(continuousCapture: true))
             using (var nullSink = new MMALNullSinkComponent())
             {
-                cam.ConfigureCameraSettings();
-
-                var outputPortConfig = new MMALPortConfig(MMALEncoding.JPEG, MMALEncoding.I420, 90);
-                var inputPortConfig = new MMALPortConfig(MMALEncoding.OPAQUE, MMALEncoding.I420, 0);
-
-                // Create our component pipeline.         
-                imgEncoder
-                    .ConfigureInputPort(inputPortConfig, null)
-                    .ConfigureOutputPort(outputPortConfig, myCaptureHandler);
-
-                cam.Camera.VideoPort.ConnectTo(splitter);
-                splitter.Outputs[0].ConnectTo(imgEncoder);
+                cam.ConfigureCameraSettings(null, myCaptureHandler);
                 cam.Camera.PreviewPort.ConnectTo(nullSink);
 
                 // Camera warm up time
                 await Task.Delay(2000);
 
                 CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-
+                var w = new Stopwatch();
+                w.Start();
                 // Process images for 15 seconds.        
                 await cam.ProcessAsync(cam.Camera.VideoPort, cts.Token);
 
-                await Verbose(myCaptureHandler.Frames.ToString());
+                w.Stop();
+                await Verbose(myCaptureHandler.Frames.ToString(), " frames, ", (myCaptureHandler.Frames * 1000 / w.ElapsedMilliseconds).ToString(), " fps");
+                await Verbose((myCaptureHandler.Bytes / 1000).ToString(), " kb, ", (myCaptureHandler.Bytes / w.ElapsedMilliseconds).ToString(), " kbps");
+
+                await Verbose((myCaptureHandler.Bytes / myCaptureHandler.Frames).ToString(), " average frame size (bytes).");
             }
 
 
