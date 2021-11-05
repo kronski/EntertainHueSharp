@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -16,15 +15,6 @@ using Org.BouncyCastle.Crypto.Tls;
 using Org.BouncyCastle.Security;
 using Q42.HueApi;
 using Q42.HueApi.Models.Groups;
-using MMALSharp;
-using MMALSharp.Handlers;
-using MMALSharp.Common;
-using MMALSharp.Config;
-using MMALSharp.Components;
-using MMALSharp.Ports;
-using MMALSharp.Native;
-using MMALSharp.Common.Utility;
-using System.Diagnostics;
 
 namespace EntertainHue
 {
@@ -62,98 +52,24 @@ namespace EntertainHue
 
             [Option("cameraframes", Required = false, HelpText = "Diagnose camera fps")]
             public bool CameraFrames { get; set; }
-        }
 
-        async Task<HueFindResponse> FindHueAsync(CancellationToken token)
-        {
-            var message = "M-SEARCH * HTTP/1.1\r\n" +
-                "HOST:239.255.255.250:1900\r\n" +
-                "ST:upnp:rootdevice\r\n" +
-                "MX:2\r\n" +
-                "MAN:\"ssdp:discover\"\r\n\r\n";
-
-            var mcastip = IPAddress.Parse("239.255.255.250");
-            using var client = new UdpClient();
-            var bindendpoint = new IPEndPoint(IPAddress.Any, 65507);
-            client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            client.Client.Bind(bindendpoint);
-            client.JoinMulticastGroup(mcastip);
-            var bytes = Encoding.UTF8.GetBytes(message);
-
-            var endpoint = new IPEndPoint(mcastip, 1900);
-            var length = await client.SendAsync(bytes, bytes.Length, endpoint);
-            var rowsplitter = new System.Text.RegularExpressions.Regex("\r\n|\r|\n");
-            var keyvaluesplitter = new System.Text.RegularExpressions.Regex("^([^\\:]*):\\s*(.*)$");
-            while (!token.IsCancellationRequested)
-            {
-                try
-                {
-                    var data = await client.ReceiveAsync().WithCancellation(token);
-                    var str = Encoding.UTF8.GetString(data.Buffer, 0, data.Buffer.Length);
-                    var lines = rowsplitter.Split(str);
-                    var dict = new Dictionary<string, string>();
-                    foreach (var line in lines)
-                    {
-                        var match = keyvaluesplitter.Match(line);
-                        if (match.Success)
-                        {
-                            var key = match.Groups[1].Value;
-                            var value = match.Groups[2].Value;
-                            dict.Add(key, value);
-                        }
-                    }
-
-                    if (dict.ContainsKey("hue-bridgeid"))
-                    {
-                        return new HueFindResponse() { Ip = data.RemoteEndPoint.Address, Port = 0, Headers = dict, Found = true };
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                }
-            }
-            return new HueFindResponse() { Found = false };
-        }
-
-        async Task<HueFindResponse> TryFindHueAsync(int timeout)
-        {
-            var cancel = new CancellationTokenSource();
-            var findHueTask = FindHueAsync(cancel.Token);
-            var timeOutTask = Task.Delay(timeout, cancel.Token);
-            var result = await Task.WhenAny(new[] { findHueTask, timeOutTask });
-            if (result == timeOutTask)
-            {
-                cancel.Cancel();
-            }
-            return await findHueTask;
-        }
-
-        async Task Verbose(params string[] s)
-        {
-            if (!options.Verbose) return;
-            var line = string.Join(" ", s);
-            await Console.Out.WriteLineAsync(line);
-        }
-
-        async Task Error(params string[] s)
-        {
-            var line = string.Join(" ", s);
-            await Console.Error.WriteLineAsync(line);
+            [Option("calibrate", Required = false, HelpText = "Calibrate lamps with web page")]
+            public bool Calibrate { get; set; }
         }
 
         async Task<bool> CheckVersion()
         {
-            await Verbose("Requesting bridge information...");
+            await ConsoleEx.Verbose("Requesting bridge information...");
             var hostname = Dns.GetHostName();
 
 
             var config = await client.GetConfigAsync();
             if (config.ApiVersion.CompareTo("1.22") < 0)
             {
-                await Verbose("Hue apiversion not 1.22 or above.");
+                await ConsoleEx.Verbose("Hue apiversion not 1.22 or above.");
                 return false;
             }
-            await Verbose($"Api version good {config.ApiVersion}...");
+            await ConsoleEx.Verbose($"Api version good {config.ApiVersion}...");
             return true;
         }
 
@@ -182,110 +98,14 @@ namespace EntertainHue
                 }
                 catch (Exception e)
                 {
-                    await Verbose(e.Message);
+                    await ConsoleEx.Verbose(e.Message);
                 }
                 await Task.Delay(5000);
             }
-            await Verbose("No client registered");
+            await ConsoleEx.Verbose("No client registered");
             return null;
         }
 
-        public async Task<bool> TakePicture()
-        {
-            // Singleton initialized lazily. Reference once in your application.
-            MMALCamera cam = MMALCamera.Instance;
-            await Verbose("Taking pic");
-            MMALCameraConfig.Flips = MMALSharp.Native.MMAL_PARAM_MIRROR_T.MMAL_PARAM_MIRROR_BOTH;
-            if (options.X.HasValue ||
-                options.Y.HasValue ||
-                options.Width.HasValue ||
-                options.Height.HasValue)
-                MMALCameraConfig.ROI = new Zoom(options.X ?? 0, options.Y ?? 0, options.Width ?? 1, options.Height ?? 1);
-
-            using (var imgCaptureHandler = new ImageStreamCaptureHandler("/home/pi/images/", "jpg"))
-            {
-                await cam.TakePicture(imgCaptureHandler, MMALEncoding.JPEG, MMALEncoding.I420);
-            }
-
-            // Cleanup disposes all unmanaged resources and unloads Broadcom library. To be called when no more processing is to be done
-            // on the camera.
-            cam.Cleanup();
-            return true;
-        }
-
-        public class MyInMemoryCaptureHandler : InMemoryCaptureHandler, IVideoCaptureHandler
-        {
-            private int frames = 0;
-            private long bytes = 0;
-            public int Frames => frames;
-            public long Bytes => bytes;
-            public override void Process(ImageContext context)
-            {
-                // The InMemoryCaptureHandler parent class has a property called "WorkingData". 
-                // It is your responsibility to look after the clearing of this property.
-
-                // The "eos" parameter indicates whether the MMAL buffer has an EOS parameter, if so, the data that's currently
-                // stored in the "WorkingData" property plus the data found in the "data" parameter indicates you have a full image frame.
-
-                // The call to base.Process will add the data to the WorkingData list.
-                base.Process(context);
-
-                if (context.Eos)
-                {
-                    //Console.WriteLine(frames.ToString());
-                    frames++;
-                    bytes += this.WorkingData.Count;
-                    this.WorkingData.Clear();
-                }
-            }
-
-            public void Split()
-            {
-
-            }
-        }
-
-
-        public async Task TakePictureFromVideoPort()
-        {
-            MMALCamera cam = MMALCamera.Instance;
-
-
-            MMALCameraConfig.VideoResolution = new Resolution(640, 480); // Set to 640 x 480. Default is 1280 x 720.
-            MMALCameraConfig.VideoFramerate = new MMAL_RATIONAL_T(500, 1); // Set to 20fps. Default is 30fps.
-            MMALCameraConfig.ShutterSpeed = 0; // Set to 2s exposure time. Default is 0 (auto).
-            MMALCameraConfig.ISO = 0; // Set ISO to 400. Default is 0 (auto).
-            MMALCameraConfig.VideoEncoding = MMALEncoding.BGR24;
-            MMALCameraConfig.VideoSubformat = MMALEncoding.BGR24;
-
-
-            using (var myCaptureHandler = new MyInMemoryCaptureHandler())
-            using (var nullSink = new MMALNullSinkComponent())
-            {
-                cam.ConfigureCameraSettings(null, myCaptureHandler);
-                cam.Camera.PreviewPort.ConnectTo(nullSink);
-
-                // Camera warm up time
-                await Task.Delay(2000);
-
-                CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                var w = new Stopwatch();
-                w.Start();
-                // Process images for 15 seconds.        
-                await cam.ProcessAsync(cam.Camera.VideoPort, cts.Token);
-
-                w.Stop();
-                await Verbose(myCaptureHandler.Frames.ToString(), " frames, ", (myCaptureHandler.Frames * 1000 / w.ElapsedMilliseconds).ToString(), " fps");
-                await Verbose((myCaptureHandler.Bytes / 1000).ToString(), " kb, ", (myCaptureHandler.Bytes / w.ElapsedMilliseconds).ToString(), " kbps");
-
-                await Verbose((myCaptureHandler.Bytes / myCaptureHandler.Frames).ToString(), " average frame size (bytes).");
-            }
-
-
-
-            // Only call when you no longer require the camera, i.e. on app shutdown.
-            cam.Cleanup();
-        }
 
         public async Task<int> Run(string[] args)
         {
@@ -297,50 +117,46 @@ namespace EntertainHue
                 {
                     foreach (var e in errors)
                     {
-                        await Error(e.ToString());
+                        await ConsoleEx.Error(e.Tag.ToString(), e.GetType().Name);
+                        await ConsoleEx.Verbose(e.Tag.ToString(), e.GetType().Name);
                     }
                 });
             if (options is null)
                 return -1;
 
+            ConsoleEx.SetVerboseOption(options.Verbose);
+
             if (options.Picture)
             {
-                await TakePicture();
+                await ConsoleEx.Verbose("Taking picture");
+                await PiCamera.Instance.TakePicture(options.X, options.Y, options.Width, options.Height);
                 return 0;
             }
 
             if (options.CameraFrames)
             {
-                await TakePictureFromVideoPort();
+                var (frames, bytes, time) = await PiCamera.Instance.SampleCameraFrameRate(TimeSpan.FromSeconds(15));
+
+                await ConsoleEx.Verbose(frames.ToString(), " frames, ", (frames * 1000 / time.ElapsedMilliseconds).ToString(), " fps");
+                await ConsoleEx.Verbose((bytes / 1000).ToString(), " kb, ", (bytes / time.ElapsedMilliseconds).ToString(), " kbps");
+                await ConsoleEx.Verbose((bytes / frames).ToString(), " average frame size (bytes).");
+
                 return 0;
             }
 
-            HueFindResponse hue;
-            if (options.IpNumber is null)
+            if (options.Calibrate)
             {
-                await Verbose("Finding hue bridge...");
-                hue = await TryFindHueAsync(5000);
-                if (!hue.Found)
-                {
-                    await Error($"No Bridge found");
-                    return -1;
-                }
-                await Verbose($"Bridge found on {hue.Ip}");
-            }
-            else
-            {
-                hue = new HueFindResponse()
-                {
-                    Found = true,
-                    Ip = IPAddress.Parse(options.IpNumber),
-                    Port = 0
-                };
-                await Verbose($"Using bridge {hue.Ip}");
+                await Calibrate.Run();
+                return 0;
             }
 
+            FindHueResponse hue = await LocateHue();
+            if (!hue.Found)
+                return -1;
 
             client = new LocalHueClient(hue.Ip.ToString());
-            if (!await CheckVersion()) return -2;
+            if (!await CheckVersion())
+                return -2;
 
             var clientdata = await ReadClientFile();
             if (clientdata is null)
@@ -352,28 +168,28 @@ namespace EntertainHue
 
             client.Initialize(clientdata.Value.Username);
 
-            await Verbose("Checking for entertainment groups");
+            await ConsoleEx.Verbose("Checking for entertainment groups");
             var groups = (await client.GetEntertainmentGroups()).Where(g => options.GroupId is null || options.GroupId == g.Id);
             Group group;
             switch (groups.Count())
             {
                 case 0:
-                    await Error("No entertainment groups found");
+                    await ConsoleEx.Error("No entertainment groups found");
                     return -3;
                 case 1:
                     group = groups.First();
-                    await Verbose("Using group", group.Id);
+                    await ConsoleEx.Verbose("Using group", group.Id);
                     break;
                 default:
-                    await Error("Multiple entertainment groups found, specify which with --groupid");
+                    await ConsoleEx.Error("Multiple entertainment groups found, specify which with --groupid");
                     foreach (var g in groups)
                     {
-                        await Error($"  {g.Id} = {g.Name}");
+                        await ConsoleEx.Error($"  {g.Id} = {g.Name}");
                     }
                     return -3;
             }
 
-            await Verbose("Enabling streaming on group");
+            await ConsoleEx.Verbose("Enabling streaming on group");
 
             CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
             CancellationToken token = cancellationTokenSource.Token;
@@ -390,10 +206,10 @@ namespace EntertainHue
             }
             if (guid == null)
             {
-                await Error("Unable to retrive guid");
+                await ConsoleEx.Error("Unable to retrive guid");
                 return -4;
             }
-            await Verbose(guid);
+            await ConsoleEx.Verbose(guid);
 
             await Connect(clientdata.Value.StreamingClientKey, clientdata.Value.Username, hue.Ip);
 
@@ -402,7 +218,6 @@ namespace EntertainHue
 
             Task t1 = Task.Run(async () =>
             {
-                //var lights = group.Lights;
                 var lights = Enumerable.Range(0, 9).Select(x => x.ToString());
                 while (!token.IsCancellationRequested)
                 {
@@ -432,6 +247,32 @@ namespace EntertainHue
             return 0;
         }
 
+        private async Task<FindHueResponse> LocateHue()
+        {
+            FindHueResponse hue;
+            if (options.IpNumber is null)
+            {
+                await ConsoleEx.Verbose("Finding hue bridge...");
+                hue = await FindHue.TryFindHueAsync(5000);
+                if (!hue.Found)
+                {
+                    await ConsoleEx.Error($"No Bridge found");
+                }
+                await ConsoleEx.Verbose($"Bridge found on {hue.Ip}");
+            }
+            else
+            {
+                hue = new FindHueResponse()
+                {
+                    Found = true,
+                    Ip = IPAddress.Parse(options.IpNumber),
+                    Port = 0
+                };
+                await ConsoleEx.Verbose($"Using bridge {hue.Ip}");
+            }
+            return hue;
+        }
+
         private async Task SaveClientFile(ClientData clientData)
         {
             var text = JsonConvert.SerializeObject(clientData);
@@ -440,13 +281,13 @@ namespace EntertainHue
 
         async Task<ClientData?> ReadClientFile()
         {
-            await Verbose($"Checking for {clientfile}");
+            await ConsoleEx.Verbose($"Checking for {clientfile}");
             if (!File.Exists(clientfile))
                 return null;
 
             var json = await File.ReadAllTextAsync(clientfile, Encoding.UTF8);
             var clientdata = JsonConvert.DeserializeObject<ClientData>(json);
-            await Verbose("Client data found", clientdata.ToString());
+            await ConsoleEx.Verbose("Client data found", clientdata.ToString());
             return clientdata;
         }
 
@@ -589,7 +430,7 @@ namespace EntertainHue
 
             var array = result.ToArray();
 
-            await Verbose(Convert.ToHexString(array));
+            await ConsoleEx.Verbose(Convert.ToHexString(array));
 
             Send(array);
         }

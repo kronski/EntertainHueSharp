@@ -12,13 +12,9 @@
             "program": "${workspaceFolder}/bin/Debug/net5.0/EntertainHueSharp.dll",
             "args": [
                 "-v",
-                "--calibrate",
                 "--ip=192.168.1.221",
                 "--groupid=5",
-                "-x 0.25",
-                "-y 0.55",
-                "-w 0.20",
-                "-h 0.18"
+                "-x 0.25 -y 0.55 -w 0.20 -h 0.18"
             ],
             "cwd": "${workspaceFolder}",
             "console": "externalTerminal",
