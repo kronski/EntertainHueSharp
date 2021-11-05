@@ -1,0 +1,20 @@
+@page
+@model CalibrateModel
+
+<h2>Calibrate camera light @Model.CurrentLight</h2>
+<div>
+    <img src="Image" width="640" height="480" alt="No image">
+</div>
+<form method="post">
+    <button type="submit" name="Next" value="@Model.CurrentLight">Next</button>
+    <button type="submit" name="Reset" value="1">Reset</button>
+    <button type="submit" name="Stop" value="1">Stop</button>
+
+    @Html.AntiForgeryToken()
+</form>
+
+<script>
+    if (window.history.replaceState) {
+        window.history.replaceState(null, null, window.location.href);
+    }
+</script>

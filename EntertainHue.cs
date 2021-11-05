@@ -146,7 +146,7 @@ namespace EntertainHue
 
             if (options.Calibrate)
             {
-                await Calibrate.Run();
+                await WebServer.Run();
                 return 0;
             }
 

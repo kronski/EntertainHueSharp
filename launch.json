@@ -8,7 +8,7 @@
             "name": ".NET Core Launch (console)",
             "type": "coreclr",
             "request": "launch",
-            "preLaunchTask": "build",
+            "preLaunchTask": "run",
             "program": "${workspaceFolder}/bin/Debug/net5.0/EntertainHueSharp.dll",
             "args": [
                 "-v",

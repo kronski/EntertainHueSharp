@@ -9,6 +9,9 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
+            "launchBrowser": {
+                "enabled": true
+            },
             "program": "${workspaceFolder}/bin/Debug/net5.0/EntertainHueSharp.dll",
             "args": [
                 "-v",
