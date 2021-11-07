@@ -1,19 +1,28 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using System;
-
+using System.Threading.Tasks;
 public class CalibrateModel : PageModel
 {
-    public int CurrentLight { get; private set; }
+    public byte CurrentLight { get; private set; }
 
-    public void OnGet()
+    public async Task OnGet()
     {
-        this.CurrentLight = 1;
+        CurrentLight = 0;
+        await HueService.Current.TurnOnSegment(CurrentLight);
     }
 
-    public void OnPost(int? Stop, int? Next)
+    public async Task OnPost(byte? Stop, byte? Next, byte? Reset)
     {
-        this.CurrentLight = (Next ?? 0) + 1;
+        if (Reset != null)
+        {
+            CurrentLight = 0;
+            await HueService.Current.TurnOnSegment(CurrentLight);
+        }
+        else if (Next != null)
+        {
+            CurrentLight = (byte)(Next.Value + 1);
+            await HueService.Current.TurnOnSegment(CurrentLight);
+        }
+        else
         if (Stop == 1)
             WebServer.Stop();
     }

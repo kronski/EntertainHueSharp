@@ -115,7 +115,7 @@ public class PiCamera : IDisposable
         }
     }
 
-    public async Task<bool> TakePicture(double? X, double? Y, double? Width, double? Height)
+    public async Task<bool> TakePicture()
     {
         await semaphoreSlim.WaitAsync();
         try
@@ -123,11 +123,13 @@ public class PiCamera : IDisposable
             // Singleton initialized lazily. Reference once in your application.
             MMALCamera cam = MMALCamera.Instance;
             MMALCameraConfig.Flips = MMALSharp.Native.MMAL_PARAM_MIRROR_T.MMAL_PARAM_MIRROR_BOTH;
-            if (X.HasValue ||
-                Y.HasValue ||
-                Width.HasValue ||
-                Height.HasValue)
-                MMALCameraConfig.ROI = new Zoom(X ?? 0, Y ?? 0, Width ?? 1, Height ?? 1);
+
+            var o = Options.Current;
+            if (o.X.HasValue ||
+                o.Y.HasValue ||
+                o.Width.HasValue ||
+                o.Height.HasValue)
+                MMALCameraConfig.ROI = new Zoom(o.X ?? 0, o.Y ?? 0, o.Width ?? 1, o.Height ?? 1);
 
             using (var imgCaptureHandler = new ImageStreamCaptureHandler("/home/pi/images/", "jpg"))
             {

@@ -12,9 +12,9 @@ using Microsoft.AspNetCore.Http;
 public static class WebServer
 {
     static CancellationTokenSource stopper;
-    public static async Task Run()
+    public static async Task Run(CancellationToken token)
     {
-        stopper = new CancellationTokenSource();
+        stopper = CancellationTokenSource.CreateLinkedTokenSource(token);
         await Host
             .CreateDefaultBuilder()
             .ConfigureWebHostDefaults(
@@ -73,9 +73,7 @@ public static class WebServer
             {
                 endpoints.MapRazorPages();
 
-                endpoints.MapControllerRoute(
-                    name: "image",
-                    pattern: "{controller=Image}/{action=Index}");
+                endpoints.MapControllerRoute(name: "image", pattern: "{controller=Image}/{action=Index}");
             });
         }
     }
