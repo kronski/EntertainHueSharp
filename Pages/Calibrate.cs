@@ -10,7 +10,13 @@ public class CalibrateModel : PageModel
         await HueService.Current.TurnOnSegment(CurrentLight);
     }
 
-    public async Task OnPost(byte? Stop, byte? Next, byte? Reset)
+    public class PointClass
+    {
+        int x { get; set; }
+        int y { get; set; }
+    }
+
+    public async Task OnPost(byte? Stop, byte? Next, byte? Reset, PointClass point)
     {
         if (Reset != null)
         {

@@ -61,10 +61,9 @@ public class HueService
             await ConsoleEx.Verbose("Finding hue bridge...");
             hue = await FindHue.TryFindHueAsync(5000);
             if (!hue.Found)
-            {
                 await ConsoleEx.Error($"No Bridge found");
-            }
-            await ConsoleEx.Verbose($"Bridge found on {hue.Ip}");
+            else
+                await ConsoleEx.Verbose($"Bridge found on {hue.Ip}");
         }
         else
         {
@@ -177,9 +176,8 @@ public class HueService
 
         await ConsoleEx.Verbose("Enabling streaming on group");
 
-        CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+        CancellationTokenSource cancellationTokenSource = new CancellationTokenSource(20000);
         CancellationToken token = cancellationTokenSource.Token;
-
 
         await client.SetStreamingAsync(group.Id, true);
         using (var ss = new StreamSubscription())
